@@ -1,4 +1,4 @@
-# problem.md
+# problem
 
 ## 🚨 Problem Statement
 
@@ -9,7 +9,7 @@ In Morocco, **Centres de Santé** are the first point of care for many patients.
 * Emergency referrals are **manual** (phone calls, paperwork)
 * No real-time visibility of **CHU capacity**
 * Delays in **doctor assignment**
-* No standardized digital patient handover
+* No standardized digital patient handover 
 
 ### Impact
 
@@ -19,7 +19,7 @@ In Morocco, **Centres de Santé** are the first point of care for many patients.
 
 ---
 
-# solution.md
+# solution
 
 ## 💡 Proposed Solution
 
@@ -28,14 +28,14 @@ We propose a **cloud-based SaaS emergency referral platform** that digitally con
 ### How It Works
 
 1. Patient arrives at a Centre de Santé
-2. Nurse registers patient and performs triage
+2. Nurse registers patient and performs triage 
 3. If urgency is **HIGH or CRITICAL**, the system automatically creates a **digital referral** to the CHU
 4. CHU doctors receive real-time notifications
 5. A doctor accepts the case and prepares for patient arrival
 
 ### Key Features
 
-* Rule-based emergency triage (AI-ready)
+* Rule-based emergency triage (AI)
 * Real-time referral to CHU
 * Automatic doctor assignment
 * Live notifications (WebSockets)
@@ -49,6 +49,3 @@ We propose a **cloud-based SaaS emergency referral platform** that digitally con
 * Scalable nationwide as a SaaS platform
 
 ---
-
-# requirements.txt
-
