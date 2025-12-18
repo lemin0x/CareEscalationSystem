@@ -79,6 +79,22 @@ export interface ReferralResponse {
   accepted_by?: number;
 }
 
+export interface ReferralCreate {
+  patient_id: number;
+  to_center_id: number;
+  reason?: string;
+  clinical_notes?: string;
+}
+
+export interface HealthCenter {
+  id: number;
+  name: string;
+  center_type: string;
+  address?: string;
+  city?: string;
+  phone?: string;
+}
+
 class ApiService {
   private getToken(): string | null {
     return localStorage.getItem('token');
@@ -139,10 +155,8 @@ class ApiService {
     });
   }
 
-  async assessTriage(patientId: number): Promise<PatientResponse> {
-    return this.request<PatientResponse>(`/triage/${patientId}/assess`, {
-      method: 'POST',
-    });
+  async getPatients(): Promise<PatientResponse[]> {
+    return this.request<PatientResponse[]>('/patients');
   }
 
   async getReferrals(statusFilter?: string): Promise<ReferralResponse[]> {
@@ -150,10 +164,21 @@ class ApiService {
     return this.request<ReferralResponse[]>(`/referrals${query}`);
   }
 
+  async createReferral(referralData: ReferralCreate): Promise<ReferralResponse> {
+    return this.request<ReferralResponse>('/referrals', {
+      method: 'POST',
+      body: JSON.stringify(referralData),
+    });
+  }
+
   async acceptReferral(referralId: number): Promise<ReferralResponse> {
     return this.request<ReferralResponse>(`/referrals/${referralId}/accept`, {
       method: 'POST',
     });
+  }
+
+  async getHealthCenters(): Promise<HealthCenter[]> {
+    return this.request<HealthCenter[]>('/health-centers');
   }
 
   async getCurrentUser(): Promise<User> {

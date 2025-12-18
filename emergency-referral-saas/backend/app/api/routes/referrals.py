@@ -19,7 +19,7 @@ router = APIRouter(prefix="/referrals", tags=["referrals"])
 async def create_referral(
     referral_data: ReferralCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("nurse", "doctor"))
+    current_user: User = Depends(require_role("nurse"))
 ):
     """
     Manually create a referral for a patient.
@@ -70,7 +70,10 @@ async def list_referrals(
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    List all referrals with optional status filter.
+    List referrals with role-based filtering.
+    
+    - Nurses see referrals from their health center
+    - Doctors see referrals to their CHU
     
     Args:
         status_filter: Optional status filter (CREATED, SENT, ACCEPTED, TRANSFERRED)
@@ -82,18 +85,34 @@ async def list_referrals(
     Returns:
         List of referral objects
     """
-    referrals = ReferralService.get_referrals_by_status(db, status_filter)
-    return referrals[skip:skip + limit]
+    from app.models.referral import Referral
+    
+    query = db.query(Referral)
+    
+    # Role-based filtering
+    if current_user.role == "nurse" and current_user.health_center_id:
+        # Nurses see referrals FROM their center
+        query = query.filter(Referral.from_center_id == current_user.health_center_id)
+    elif current_user.role == "doctor" and current_user.health_center_id:
+        # Doctors see referrals TO their CHU
+        query = query.filter(Referral.to_center_id == current_user.health_center_id)
+    
+    # Apply status filter if provided
+    if status_filter:
+        query = query.filter(Referral.status == status_filter)
+    
+    referrals = query.order_by(Referral.created_at.desc()).offset(skip).limit(limit).all()
+    return referrals
 
 
-@router.get("/{referral_id}", response_model=ReferralResponse)
+@router.get("/{referral_id}", response_model=ReferralWithPatient)
 async def get_referral(
     referral_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Get a specific referral by ID.
+    Get a specific referral by ID with patient details.
     
     Args:
         referral_id: Referral ID
@@ -101,7 +120,7 @@ async def get_referral(
         current_user: Current authenticated user
         
     Returns:
-        Referral object
+        Referral object with patient details
         
     Raises:
         HTTPException: If referral not found
@@ -112,6 +131,21 @@ async def get_referral(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Referral with ID {referral_id} not found"
         )
+    
+    # Role-based access check
+    if current_user.role == "nurse" and current_user.health_center_id:
+        if referral.from_center_id != current_user.health_center_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: This referral does not belong to your health center"
+            )
+    elif current_user.role == "doctor" and current_user.health_center_id:
+        if referral.to_center_id != current_user.health_center_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: This referral is not for your CHU"
+            )
+    
     return referral
 
 

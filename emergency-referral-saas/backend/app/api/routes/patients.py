@@ -118,7 +118,10 @@ async def list_patients(
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    List all patients with pagination.
+    List patients with role-based filtering.
+    
+    - Nurses see only patients from their health center
+    - Doctors see all patients
     
     Args:
         skip: Number of records to skip
@@ -129,7 +132,13 @@ async def list_patients(
     Returns:
         List of patient objects
     """
-    patients = db.query(Patient).offset(skip).limit(limit).all()
+    query = db.query(Patient)
+    
+    # Role-based filtering: nurses see only their center's patients
+    if current_user.role == "nurse" and current_user.health_center_id:
+        query = query.filter(Patient.health_center_id == current_user.health_center_id)
+    
+    patients = query.order_by(Patient.created_at.desc()).offset(skip).limit(limit).all()
     return patients
 
 

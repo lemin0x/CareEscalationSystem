@@ -72,7 +72,7 @@ export const ReferralCard: React.FC<ReferralCardProps> = ({
         )}
       </div>
 
-      {showAcceptButton && referral.status === 'SENT' && onAccept && (
+      {showAcceptButton && (referral.status === 'SENT' || referral.status === 'CREATED') && onAccept && (
         <button
           onClick={() => onAccept(referral.id)}
           disabled={isAccepting}

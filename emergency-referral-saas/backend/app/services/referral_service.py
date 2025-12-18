@@ -58,19 +58,31 @@ class ReferralService:
         if to_center.center_type != "CHU":
             raise ValueError("Destination must be a CHU")
         
+        # Check for existing referral for this patient (prevent duplicates)
+        existing_referral = db.query(Referral).filter(
+            and_(
+                Referral.patient_id == patient_id,
+                Referral.status.in_(["CREATED", "SENT", "ACCEPTED"])
+            )
+        ).first()
+        
+        if existing_referral:
+            raise ValueError(f"Patient already has an active referral (ID: {existing_referral.id}, Status: {existing_referral.status})")
+        
         # Determine priority from patient triage level
         priority = patient.triage_level or "CRITICAL"
         
-        # Create referral
+        # Create referral (status SENT when manually created by nurse)
         referral = Referral(
             patient_id=patient_id,
             from_center_id=from_center.id,
             to_center_id=to_center_id,
-            status="CREATED",
+            status="SENT",  # When manually created by nurse, mark as SENT immediately
             priority=priority,
             reason=reason or f"Critical case requiring CHU care",
             clinical_notes=clinical_notes,
-            created_by=created_by
+            created_by=created_by,
+            sent_at=datetime.utcnow()  # Set sent_at when creating
         )
         
         db.add(referral)
@@ -115,15 +127,35 @@ class ReferralService:
             # No CHU available - log this in production
             return None
         
-        # Create referral
-        return ReferralService.create_referral(
-            db=db,
+        # Check if referral already exists (prevent duplicates in auto-create)
+        existing_referral = db.query(Referral).filter(
+            and_(
+                Referral.patient_id == patient_id,
+                Referral.status.in_(["CREATED", "SENT", "ACCEPTED"])
+            )
+        ).first()
+        
+        if existing_referral:
+            return existing_referral
+        
+        # Create referral (status SENT for auto-referrals - immediately visible to CHU)
+        referral = Referral(
             patient_id=patient_id,
+            from_center_id=patient.health_center_id,
             to_center_id=chu.id,
-            created_by=created_by,
+            status="SENT",  # Auto-referrals are immediately sent
+            priority=patient.triage_level or "CRITICAL",
             reason="Auto-referral: Critical case from Centre de Santé",
-            clinical_notes=f"Patient triage level: {patient.triage_level}"
+            clinical_notes=f"Patient triage level: {patient.triage_level}",
+            created_by=created_by,
+            sent_at=datetime.utcnow()  # Set sent_at immediately
         )
+        
+        db.add(referral)
+        db.commit()
+        db.refresh(referral)
+        
+        return referral
     
     @staticmethod
     def send_referral(db: Session, referral_id: int) -> Referral:

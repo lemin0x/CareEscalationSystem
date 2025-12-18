@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { PatientForm } from '../components/PatientForm';
-import { apiService, PatientResponse, ReferralResponse } from '../services/api';
+import { apiService, PatientResponse, ReferralResponse, HealthCenter, ReferralCreate } from '../services/api';
 import { websocketService, WebSocketMessage } from '../services/websocket';
 import { NotificationToast } from '../components/NotificationToast';
 
@@ -15,10 +15,19 @@ interface Notification {
 export const CentreDashboard: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [recentPatient, setRecentPatient] = useState<PatientResponse | null>(null);
+  const [patients, setPatients] = useState<PatientResponse[]>([]);
   const [referrals, setReferrals] = useState<ReferralResponse[]>([]);
+  const [healthCenters, setHealthCenters] = useState<HealthCenter[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [showReferralModal, setShowReferralModal] = useState(false);
+  const [selectedPatient, setSelectedPatient] = useState<PatientResponse | null>(null);
+  const [referralForm, setReferralForm] = useState<ReferralCreate>({
+    patient_id: 0,
+    to_center_id: 0,
+    reason: '',
+    clinical_notes: '',
+  });
 
   useEffect(() => {
     if (!user) {
@@ -26,8 +35,10 @@ export const CentreDashboard: React.FC = () => {
       return;
     }
 
-    // Load referrals
+    // Load data
+    loadPatients();
     loadReferrals();
+    loadHealthCenters();
 
     // Connect to WebSocket
     websocketService.connect();
@@ -41,6 +52,7 @@ export const CentreDashboard: React.FC = () => {
               : 'Referral accepted',
           type: 'info',
         });
+        loadPatients();
         loadReferrals();
       }
     });
@@ -50,37 +62,111 @@ export const CentreDashboard: React.FC = () => {
     };
   }, [user, navigate]);
 
-  const loadReferrals = async () => {
+  const loadPatients = async () => {
     try {
       setIsLoading(true);
-      const data = await apiService.getReferrals();
-      setReferrals(data);
+      const data = await apiService.getPatients();
+      setPatients(data);
     } catch (error) {
-      console.error('Failed to load referrals:', error);
+      console.error('Failed to load patients:', error);
+      addNotification({
+        id: Date.now(),
+        message: 'Failed to load patients',
+        type: 'error',
+      });
     } finally {
       setIsLoading(false);
     }
   };
 
+  const loadReferrals = async () => {
+    try {
+      const data = await apiService.getReferrals();
+      setReferrals(data);
+    } catch (error) {
+      console.error('Failed to load referrals:', error);
+    }
+  };
+
+  const loadHealthCenters = async () => {
+    try {
+      const data = await apiService.getHealthCenters();
+      // Filter to only show CHU centers
+      const chuCenters = data.filter(hc => hc.center_type === 'CHU');
+      setHealthCenters(chuCenters);
+    } catch (error) {
+      console.error('Failed to load health centers:', error);
+    }
+  };
+
   const handlePatientCreated = async (patientId: number) => {
     try {
-      // Assess triage
-      const patient = await apiService.assessTriage(patientId);
-      setRecentPatient(patient);
       addNotification({
         id: Date.now(),
-        message: `Patient registered. Triage: ${patient.triage_level || 'N/A'}`,
+        message: 'Patient registered successfully',
         type: 'success',
       });
-      // Reload referrals in case a new one was created
-      setTimeout(() => loadReferrals(), 1000);
+      // Reload patients and referrals (referral may be auto-created)
+      setTimeout(() => {
+        loadPatients();
+        loadReferrals();
+      }, 500);
     } catch (error) {
       addNotification({
         id: Date.now(),
-        message: 'Failed to assess triage',
+        message: 'Failed to register patient',
         type: 'error',
       });
     }
+  };
+
+  const handleReferPatient = (patient: PatientResponse) => {
+    setSelectedPatient(patient);
+    setReferralForm({
+      patient_id: patient.id,
+      to_center_id: healthCenters[0]?.id || 0,
+      reason: '',
+      clinical_notes: '',
+    });
+    setShowReferralModal(true);
+  };
+
+  const handleCreateReferral = async () => {
+    if (!referralForm.to_center_id) {
+      addNotification({
+        id: Date.now(),
+        message: 'Please select a CHU',
+        type: 'error',
+      });
+      return;
+    }
+
+    try {
+      await apiService.createReferral(referralForm);
+      addNotification({
+        id: Date.now(),
+        message: 'Referral created successfully',
+        type: 'success',
+      });
+      setShowReferralModal(false);
+      loadReferrals();
+    } catch (error) {
+      addNotification({
+        id: Date.now(),
+        message: error instanceof Error ? error.message : 'Failed to create referral',
+        type: 'error',
+      });
+    }
+  };
+
+  const getPatientReferralStatus = (patientId: number): string | null => {
+    const referral = referrals.find(r => r.patient_id === patientId);
+    return referral ? referral.status : null;
+  };
+
+  const hasActiveReferral = (patientId: number): boolean => {
+    const referral = referrals.find(r => r.patient_id === patientId);
+    return referral ? ['CREATED', 'SENT', 'ACCEPTED'].includes(referral.status) : false;
   };
 
   const addNotification = (notification: Notification) => {
@@ -141,37 +227,55 @@ export const CentreDashboard: React.FC = () => {
             />
           </div>
 
-          {/* Recent Patient Info */}
+          {/* Patient List */}
           <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">Recent Patient</h2>
-            {recentPatient ? (
-              <div className="space-y-3">
-                <div>
-                  <span className="font-medium">Name:</span>{' '}
-                  {recentPatient.first_name} {recentPatient.last_name}
-                </div>
-                <div>
-                  <span className="font-medium">Age:</span> {recentPatient.age}
-                </div>
-                <div>
-                  <span className="font-medium">Triage Level:</span>{' '}
-                  <span
-                    className={`${getUrgencyColor(
-                      recentPatient.triage_level
-                    )} text-white px-3 py-1 rounded-full text-xs font-medium inline-block`}
-                  >
-                    {recentPatient.triage_level || 'N/A'}
-                  </span>
-                </div>
-                {recentPatient.chief_complaint && (
-                  <div>
-                    <span className="font-medium">Complaint:</span>{' '}
-                    {recentPatient.chief_complaint}
-                  </div>
-                )}
-              </div>
+            <h2 className="text-xl font-semibold mb-4">Patients</h2>
+            {isLoading ? (
+              <p className="text-gray-500">Loading patients...</p>
+            ) : patients.length === 0 ? (
+              <p className="text-gray-500">No patients registered yet</p>
             ) : (
-              <p className="text-gray-500">No patient registered yet</p>
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {patients.map((patient) => (
+                  <div
+                    key={patient.id}
+                    className="border border-gray-200 rounded-lg p-3 hover:bg-gray-50"
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <div className="font-medium">
+                          {patient.first_name} {patient.last_name}
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          Age: {patient.age} | {patient.gender}
+                        </div>
+                        {patient.triage_level && (
+                          <span
+                            className={`${getUrgencyColor(
+                              patient.triage_level
+                            )} text-white px-2 py-1 rounded text-xs font-medium inline-block mt-1`}
+                          >
+                            {patient.triage_level}
+                          </span>
+                        )}
+                        {getPatientReferralStatus(patient.id) && (
+                          <div className="text-xs text-gray-500 mt-1">
+                            Referral: {getPatientReferralStatus(patient.id)}
+                          </div>
+                        )}
+                      </div>
+                      {!hasActiveReferral(patient.id) && (
+                        <button
+                          onClick={() => handleReferPatient(patient)}
+                          className="ml-2 px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+                        >
+                          Refer
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>
@@ -216,6 +320,72 @@ export const CentreDashboard: React.FC = () => {
           )}
         </div>
       </main>
+
+      {/* Referral Modal */}
+      {showReferralModal && selectedPatient && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-xl font-semibold mb-4">
+              Refer Patient: {selectedPatient.first_name} {selectedPatient.last_name}
+            </h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Select CHU</label>
+                <select
+                  value={referralForm.to_center_id}
+                  onChange={(e) =>
+                    setReferralForm({ ...referralForm, to_center_id: parseInt(e.target.value) })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                >
+                  <option value={0}>Select a CHU</option>
+                  {healthCenters.map((hc) => (
+                    <option key={hc.id} value={hc.id}>
+                      {hc.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Reason</label>
+                <textarea
+                  value={referralForm.reason}
+                  onChange={(e) =>
+                    setReferralForm({ ...referralForm, reason: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  rows={3}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Clinical Notes</label>
+                <textarea
+                  value={referralForm.clinical_notes}
+                  onChange={(e) =>
+                    setReferralForm({ ...referralForm, clinical_notes: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  rows={3}
+                />
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleCreateReferral}
+                  className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700"
+                >
+                  Create Referral
+                </button>
+                <button
+                  onClick={() => setShowReferralModal(false)}
+                  className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-400"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Notifications */}
       {notifications.map((notification) => (
